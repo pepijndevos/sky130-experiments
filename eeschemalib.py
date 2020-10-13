@@ -104,7 +104,8 @@ for cell in cells:
         lib.write(cap.format(symbol_name=cell, spice_model="sky130_fd_pr__"+cell))
         dcm.write(doc.format(symbol_name=cell, symbol_keywords="capacitor", symbol_description="Sky130 cap"))
 
-lib.write("""#
+lib.write("""
+#
 #End Library""")
 
 lib.close()
