@@ -1,0 +1,13 @@
+.control
+  let run=1
+  dowhile run <= 40
+    if run > 1
+      reset
+      set appendwrite
+    end
+    save saout cal i(vvcc) en plus minus
+    tran 0.1n 900n uic
+    write autozero_comp.raw
+    let run = run + 1
+  end
+.endc
