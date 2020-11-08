@@ -1,0 +1,72 @@
+* DC sweep for technology characterization
+* Boris Murmann, 2013
+
+.library '../ON.PDK/hspice/current/ami_c5n.T22Y.lib' TT
+.include 'techchar_params.sp'
+
+.param ds = 0.9
+.param gs = 0.9
+
+
+
+vdsn     vdn 0         dc 'ds'
+vgsn     vgn 0         dc 'gs'
+vbsn     vbn 0         dc '-subvol'
+mn       vdn vgn 0 vbn ami06n L='length' W='width'
+vdsp     vdp 0         dc '-ds'
+vgsp     vgp 0         dc '-gs'
+vbsp     vbp 0         dc 'subvol'
+mp       vdp vgp 0 vbp ami06p L='length' W='width'
+
+.options dccap post brief accurate nomod
+.op
+*.dc vgsn 0 'gsmax' 'gsstep' vdsn 0 'dsmax' 'dsstep'
+.dc vdsn 0 'gsmax' 'gsstep' vgsn 0 'dsmax' 'dsstep'
+
+.probe @mn[id]
+.probe @mn[vth]
+.probe @mn[gm]
+.probe @mn[gmbs]
+.probe @mn[gds]
+.probe @mn[cgg]
+.probe @mn[cgs]
+.probe @mn[cgd]
+.probe @mn[cbg]
+.probe @mn[cdd]
+.probe @mn[cbs]
+
+.probe @mp[id]
+.probe @mp[vth]
+.probe @mp[gm]
+.probe @mp[gmbs]
+.probe @mp[gds]
+.probe @mp[cgg]
+.probe @mp[cgs]
+.probe @mp[cgd]
+.probe @mp[cbg]
+.probe @mp[cdd]
+.probe @mp[cbs]
+
+*.probe n_vt   = par('vth(mn)')
+*.probe n_gm   = par('gmo(mn)')
+*.probe n_gmb  = par('gmbso(mn)')
+*.probe n_gds  = par('gdso(mn)')
+*.probe n_cgg  = par('cggbo(mn)')
+*.probe n_cgs  = par('-cgsbo(mn)')
+*.probe n_cgd  = par('-cgdbo(mn)')
+*.probe n_cgb  = par('cbgbo(mn)')
+*.probe n_cdd  = par('cddbo(mn)')
+*.probe n_css  = par('-cgsbo(mn)-cbsbo(mn)')
+*
+*.probe p_id   = par('-i(mp)')
+*.probe p_vt   = par('vth(mp)')
+*.probe p_gm   = par('gmo(mp)')
+*.probe p_gmb  = par('gmbso(mp)')
+*.probe p_gds  = par('gdso(mp)')
+*.probe p_cgg  = par('cggbo(mp)')
+*.probe p_cgs  = par('-cgsbo(mp)')
+*.probe p_cgd  = par('-cgdbo(mp)')
+*.probe p_cgb  = par('cbgbo(mp)')
+*.probe p_cdd  = par('cddbo(mp)')
+*.probe p_css  = par('-cgsbo(mp)-cbsbo(mp)')
+

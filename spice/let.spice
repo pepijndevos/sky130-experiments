@@ -1,0 +1,14 @@
+.ac dec 20 10 10Meg
+.control
+  set controlswait
+* calculate loop gain, noise gain, open loop gain
+  let AB=V("/m2")/V("/m1")
+  let B1=V(out)/V("/m2")
+  let Aol=V(out)/V("/m1")
+* print out cross-over frequency and phase margin
+  let dbAB=db(AB)
+  let phAB=180/pi*ph(AB)
+  display
+  meas ac unitf when dbAB=0
+  meas ac phm find phAB at=unitf
+.endc
