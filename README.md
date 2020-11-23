@@ -14,3 +14,11 @@ This is my personal collection of random snippets and scripts that I wrote or co
 * https://github.com/diadatp/sky130_rf_tools
 * https://github.com/tclarke/sky130radio
 * https://github.com/mkghub/skywater_fd_pr_tree
+* https://github.com/yrrapt/amsat_txrx_ic
+* https://github.com/mabrains/sky130_ubuntu_setup
+* https://github.com/lakshmi-sathi/avsdpll_1v8
+* https://github.com/mattvenn/multi-project-harness
+
+## Interesting non-repos
+
+* https://www.udemy.com/course/vsd-a-complete-guide-to-install-openlane-and-sky130nm-pdk/
