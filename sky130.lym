@@ -1,0 +1,1028 @@
+<?xml version="1.0" encoding="utf-8"?>
+<klayout-macro>
+ <description/>
+ <version/>
+ <category>pymacros</category>
+ <prolog/>
+ <epilog/>
+ <doc/>
+ <autorun>true</autorun>
+ <autorun-early>false</autorun-early>
+ <shortcut/>
+ <show-in-menu>false</show-in-menu>
+ <group-name/>
+ <menu-path/>
+ <interpreter>python</interpreter>
+ <dsl-interpreter-name/>
+ <text>import pya
+
+
+# MOS PCell decleration
+class MOS(pya.PCellDeclarationHelper):
+
+  def __init__(self):
+
+    # Important: initialize the super class
+    super(MOS, self).__init__()
+
+    # declare the parameters
+    self.type_choices = [("nshort", 0), ("nlowvt", 1), ("nhv", 2), ("nhvnative", 3), ("pshort", 4), ("plowvt", 5), ("phighvt", 6), ("phv", 7)]
+    self.param("type", self.TypeInt, "NMOS Type", choices=self.type_choices)
+    self.param("w", self.TypeDouble, "Width (um)", default = 0.42)
+    self.param("ln", self.TypeDouble, "Length (um)", default = 0.15)
+    self.param("nf", self.TypeInt, "Fingers", default = 1)
+    self.param("m", self.TypeInt, "Multiplier", default = 1)
+    self.param("diffcov", self.TypeInt, "Diffusion Contact Coverage (%)", default = 100)
+    self.param("polycov", self.TypeInt, "Poly Contact Coverage (%)", default = 100)
+    self.param("poverlap", self.TypeBoolean, "Overlap at poly contact", default = False)
+    self.param("dpoverlap", self.TypeBoolean, "Overlap at diffusion contact", default = True)
+    self.param("topc", self.TypeBoolean, "Add top gate contact", default = True)
+    self.param("botc", self.TypeBoolean, "Add bottom gate contact", default = True)
+
+    # define the rules
+    self.poly_surround    = 0.08      # Poly surrounds contact
+    self.diff_surround    = 0.06      # Diffusion surrounds contact
+    self.gate_to_diffcont = 0.145     # Gate to diffusion contact center
+    self.gate_to_polycont = 0.275     # Gate to poly contact center
+    self.gate_extension   = 0.13      # Poly extension beyond gate
+    self.diff_extension   = 0.29      # Diffusion extension beyond gate
+    self.contact_size     = 0.17      # Minimum contact size
+    self.via_size         = 0.17      # Minimum via size
+    self.metal_surround   = 0.08      # Local interconnect overlaps contact
+    self.sub_surround     = 0.18      # Sub/well surrounds diffusion
+    self.diff_spacing     = 0.28      # Diffusion spacing rule
+    self.poly_spacing     = 0.21      # Poly spacing rule
+    self.diff_poly_space  = 0.075     # Diffusion to poly spacing rule
+    self.diff_gate_space  = 0.20      # Diffusion to gate poly spacing rule
+    self.metal_spacing    = 0.23      # Local interconnect spacing rule
+    self.mmetal_spacing   = 0.14      # Metal spacing rule (above local interconnect)
+    self.res_to_cont      = 0.20      # resistor to contact center
+    self.res_diff_space   = 0.20      # resistor to guard ring
+    self.npc_poly_con_enc = 0.10      # enclosure of poly contact by npc
+    self.nsdm_diff_enc    = 0.125     # enclosure of diffusion by doping
+    self.li_licon_enc     = 0.08      # enclosure of diffusion by doping
+    self.lvtn_gate_enc    = 0.18      # enclosure of gate by lvtn
+    self.hvtp_gate_enc    = 0.18      # enclosure of gate by hvtp
+    self.hvi_diff_enc     = 0.185     # enclosure of diff by hvi
+    self.hvntm_diff_enc   = 0.185     # enclosure of diff by hvntm
+  
+
+  def display_text_impl(self):
+    # Provide a descriptive text for the cell
+    return ("%s(W=" % self.type_choices[int(self.type)][0].upper()) + ('%.3f' % self.w) + ", L=" + ('%.3f' % self.ln) + ")"
+  
+
+  def draw_contact(self, w, h, s, o, x, atype, ctype, mtype, box, orient='vert'):
+    """
+        Draw a minimum-size diff contact centered at current position
+        w is width, h is height.  Minimum size ensured.
+        x is contact size
+        s is contact diffusion (or poly) surround
+        o is contact metal surround
+        atype is active (e.g., ndiff) or bottom metal if a via
+        ctype is contact (e.g., ndc)
+        mtype is metal (e.g., m1) or top metal if a via
+        orient is the orientation of the contact
+    """
+
+    # Set orientations for the bottom material based on material type.
+    # Substrate diffusions (tap) need not overlap the contact in all
+    # directions, but other (diff) types do.  The metal (local
+    # interconnect) layer always overlaps in two directions only.
+    lv_sub_types = ["psd", "nsd"]
+    if atype in lv_sub_types:
+      aorient = orient
+    else:
+      aorient = "full"
+
+    # get the existing box location and set to zero width/height
+    [box_left, box_bottom, box_right, box_top] = box
+    box_right = box_left
+    box_top = box_bottom
+
+    # make it at least one contact in size
+    if w &lt; x:
+      w = x
+    if h &lt; x:
+      h = x
+    
+    # deal with center position, widths and heights are plus/minus from this
+    hw = w / 2.0
+    hh = h / 2.0
+
+    # set contact area
+    contact_top = box_top + hh
+    contact_bottom = box_bottom - hh
+    contact_left = box_left - hw
+    contact_right = box_right + hw
+
+
+    box_top += hh
+    box_bottom -= hh
+    box_left -= hw
+    box_right += hw
+    
+    
+    # we want to know the extents of the drawn contacts
+    cont_extent_left = 100000000.0
+    cont_extent_bottom = 100000000.0
+    cont_extent_right = -100000000.0
+    cont_extent_top = -100000000.0
+
+    # keep a record of the current box shape
+    box_record = [box_left, box_bottom, box_right, box_top]
+
+
+    # Top layer surrounded on sides as declared by orient
+    if orient == "vert" or orient == "full":
+      box_top += o
+      box_bottom -= o
+    
+    if orient == "horz" or orient == "full":
+      box_left -= o
+      box_right += o
+
+    # draw the metal
+    m_box_left = box_left
+    m_box_right = box_right
+    m_box_bottom = box_bottom
+    m_box_top = box_top
+    m_box = pya.Box()
+    m_box.left = m_box_left/self.layout.dbu
+    m_box.right = m_box_right/self.layout.dbu
+    m_box.bottom = m_box_bottom/self.layout.dbu
+    m_box.top = m_box_top/self.layout.dbu
+    self.cell.shapes(mtype).insert(m_box)
+    
+    # grab the previous box size
+    [box_left, box_bottom, box_right, box_top] = box_record
+
+    # differ here from magic
+    #  magic separates shapes into different contacts at GDS export
+    #  we need to this here
+    box = pya.Box()
+    if orient == 'vert':
+
+      # ensure there's enough metal enclosure
+      contact_top += min(0, m_box_top - contact_top - self.li_licon_enc)
+      contact_bottom -= min(0, contact_bottom - m_box_bottom - self.li_licon_enc)
+      
+      # find contacts center and number
+      center = (contact_top - contact_bottom)/2
+      number_contacts = int(center/self.contact_size)
+      number_contacts = max(1, number_contacts)
+
+      # loop through drawing each of the contacts
+      for n in range(number_contacts):
+        box_left = contact_left
+        box_bottom = self.contact_size*(number_contacts - 2*n - 1.5)
+        box_right = contact_right
+        box_top = box_bottom + self.contact_size
+        box.left = box_left/self.layout.dbu
+        box.right = box_right/self.layout.dbu
+        box.bottom = box_bottom/self.layout.dbu
+        box.top = box_top/self.layout.dbu
+        self.cell.shapes(ctype).insert(box)
+        
+        # update the known extents of the contacts
+        cont_extent_left = min(cont_extent_left, box_left)
+        cont_extent_bottom = min(cont_extent_bottom, box_bottom)
+        cont_extent_right = max(cont_extent_right, cont_extent_right, box_right)
+        cont_extent_top = max(cont_extent_top, box_top)
+        
+        
+    # horizontal contacts
+    else:
+
+      # ensure there's enough metal enclosure
+      contact_right += min(0, m_box_right - contact_right - self.li_licon_enc)
+      contact_left -= min(0, contact_left - m_box_left - self.li_licon_enc)
+
+      # find contacts center and number
+      center = (contact_right - contact_left)/2
+      number_contacts = int(center/self.contact_size)
+      number_contacts = max(1, number_contacts)
+      
+      # loop through drawing each of the contacts
+      for n in range(number_contacts):
+        box_left = self.contact_size*(number_contacts - 2*n - 1.5)
+        box_bottom = contact_bottom
+        box_right = box_left + self.contact_size
+        box_top = contact_top
+        box.left = box_left/self.layout.dbu
+        box.right = box_right/self.layout.dbu
+        box.bottom = box_bottom/self.layout.dbu
+        box.top = box_top/self.layout.dbu
+        self.cell.shapes(ctype).insert(box)
+        
+        # update the known extents of the contacts
+        cont_extent_left = min(cont_extent_left, box_left)
+        cont_extent_bottom = min(cont_extent_bottom, box_bottom)
+        cont_extent_right = max(cont_extent_right, box_right)
+        cont_extent_top = max(cont_extent_top, box_top)
+    
+    
+    # grab the previous box size
+    box_left, box_bottom, box_right, box_top = box_record
+
+    # Bottom layer surrounded on sides as declared by aorient
+    if aorient == "vert" or aorient == "full":
+      box_top += s
+      box_bottom -= s
+    
+    if aorient == "horz" or aorient == "full":
+      box_left -= s
+      box_right += s
+    
+    box.left = box_left/self.layout.dbu
+    box.right = box_right/self.layout.dbu
+    box.bottom = box_bottom/self.layout.dbu
+    box.top = box_top/self.layout.dbu
+    self.cell.shapes(atype).insert(box)
+
+    extents = [box_top, box_bottom, box_left, box_right]
+    box_left, box_bottom, box_right, box_top = box_record
+   
+
+    # poly contacts have been drawn add the npc surround
+    if atype == self.layer_poly:
+      npc = pya.Box()
+      npc.left = (cont_extent_left - self.npc_poly_con_enc)/self.layout.dbu
+      npc.right = (cont_extent_right + self.npc_poly_con_enc)/self.layout.dbu
+      npc.bottom = (cont_extent_bottom - self.npc_poly_con_enc)/self.layout.dbu
+      npc.top = (cont_extent_top + self.npc_poly_con_enc)/self.layout.dbu
+      self.cell.shapes(self.layer_npc).insert(npc)
+  
+    return extents
+
+
+
+
+
+  def unionbox(self, box1, box2):
+    """
+        Union two boxes
+        Taken from the original magic PCell generator
+    """
+
+    newbox = []
+    for i in range(2):
+      v = box1[i]
+      o = box2[i]
+        
+      if v &lt; o:
+        newbox.append(v)
+      else:
+        newbox.append(o)
+      
+    for i in range(4):
+      v = box1[i]
+      o = box2[i]
+      
+      if v &gt; o:
+        newbox.append(v)
+      else:
+        newbox.append(o)
+    
+    return newbox
+
+
+
+  def draw_diffusion(self):
+
+    # calculate the diffusion dimension
+    hw = self.w / 2.0
+    hl = self.ln / 2.0
+    self.he = self.selected_device["min_effl"] / 2.0
+    
+    if self.nf == 1 or self.he &lt; hl:
+      self.he = hl
+    
+    # draw the diffusion
+    diff_box_top = hw
+    diff_box_bottom = -hw
+    diff_box_left = -hl
+    diff_box_right = hl
+
+    # select how to handle the diffusion contacts
+    if self.diff_extension &gt; self.gate_to_diffcont:
+      diff_box_left -= self.diff_extension
+      diff_box_right += self.diff_extension
+    else:
+      diff_box_left -= self.gate_to_diffcont
+      diff_box_right += self.gate_to_diffcont
+
+    # draw the diffusion
+    diff_box = pya.Box()
+    diff_box.left = diff_box_left/self.layout.dbu
+    diff_box.right = diff_box_right/self.layout.dbu
+    diff_box.bottom = diff_box_bottom/self.layout.dbu
+    diff_box.top = diff_box_top/self.layout.dbu
+    self.cell.shapes(self.selected_device["diff"]).insert(diff_box)
+    
+    # add the nsdm enclosure of diff
+    imp_box = pya.Box()
+    imp_box.left = (diff_box_left - self.nsdm_diff_enc)/self.layout.dbu
+    imp_box.right = (diff_box_right + self.nsdm_diff_enc)/self.layout.dbu
+    imp_box.bottom = (diff_box_bottom - self.nsdm_diff_enc)/self.layout.dbu
+    imp_box.top = (diff_box_top + self.nsdm_diff_enc)/self.layout.dbu
+    self.cell.shapes(self.selected_device["imp"]).insert(imp_box)
+    
+    # if required add the hvi enclosure of diff
+    if "hvi" in self.selected_device.keys():
+      hvi_box = pya.Box()
+      hvi_box.left = (diff_box_left - self.hvi_diff_enc)/self.layout.dbu
+      hvi_box.right = (diff_box_right + self.hvi_diff_enc)/self.layout.dbu
+      hvi_box.bottom = (diff_box_bottom - self.hvi_diff_enc)/self.layout.dbu
+      hvi_box.top = (diff_box_top + self.hvi_diff_enc)/self.layout.dbu
+      self.cell.shapes(self.selected_device["hvi"]).insert(hvi_box)
+    
+    # if required add the hvi enclosure of diff
+    if "hvntm" in self.selected_device.keys():
+      hvntm_box = pya.Box()
+      hvntm_box.left = (diff_box_left - self.hvntm_diff_enc)/self.layout.dbu
+      hvntm_box.right = (diff_box_right + self.hvntm_diff_enc)/self.layout.dbu
+      hvntm_box.bottom = (diff_box_bottom - self.hvntm_diff_enc)/self.layout.dbu
+      hvntm_box.top = (diff_box_top + self.hvntm_diff_enc)/self.layout.dbu
+      self.cell.shapes(self.selected_device["hvntm"]).insert(hvntm_box)
+
+    self.hw = hw
+    self.hl = hl
+
+
+  def draw_poly(self):
+
+    # draw the poly
+    poly_box_top = self.hw
+    poly_box_bottom = -self.hw
+    poly_box_left = -self.hl
+    poly_box_right = self.hl
+    if self.gate_extension &gt; self.gate_to_polycont:
+      poly_box_top += self.gate_extension
+      poly_box_bottom -= self.gate_extension
+    else:
+      if self.topc:
+        poly_box_top += self.gate_to_polycont
+      else:
+        poly_box_top += self.gate_extension
+    
+      if self.botc:
+        poly_box_bottom -= self.gate_to_polycont
+      else:
+        poly_box_bottom -= self.gate_extension
+    
+    # draw the poly shape
+    poly_box = pya.Box()
+    poly_box.left = poly_box_left/self.layout.dbu
+    poly_box.bottom = poly_box_bottom/self.layout.dbu
+    poly_box.right = poly_box_right/self.layout.dbu
+    poly_box.top = poly_box_top/self.layout.dbu
+    self.cell.shapes(self.selected_device["poly"]).insert(poly_box)
+
+    self.cext = [poly_box_left, poly_box_bottom, poly_box_right, poly_box_top]
+
+
+    # draw well
+    #if self.device["well"]:
+
+        # define the well shape
+        #poly_box_top = self.diffarea[3] + self.sub_surround
+        #poly_box_bottom = self.diffarea[1] + self.sub_surround
+        #poly_box_left = self.diffarea[0] + self.sub_surround
+        #poly_box_right = self.diffarea[2] + self.sub_surround
+
+        # draw the well shape
+        #well_box = pya.Box()
+        #well_box.left = well_box_left/self.layout.dbu
+        #well_box.bottom = well_box_bottom/self.layout.dbu
+        #well_box.right = well_box_right/self.layout.dbu
+        #well_box.top = well_box_top/self.layout.dbu
+        #self.cell.shapes(self.selected_device["well"]).insert(well_box)
+	
+#        self.cext = [well_box_left, well_box_bottom, well_box_right, well_box_top]
+
+
+    
+    
+
+    
+  def draw_poly_diff_contacts(self):
+
+    # Adjust position of contacts for dogbone geometry
+    # Rule 1: Minimize diffusion length.  Contacts only move out
+    # if width &lt;  contact diffusion height.  They move out enough
+    # that the diffusion-to-poly spacing is satisfied.
+    ddover = 0
+    cdwmin = self.contact_size + (2*self.diff_surround)
+    cstem  = self.gate_to_diffcont - (cdwmin / 2.0)
+    cgrow = self.diff_poly_space - cstem
+
+    if (self.w + self.eps) &lt; cdwmin:
+      if cgrow &gt; 0:
+        gate_to_diffcont = self.gate_to_diffcont + cgrow
+      else:
+        gate_to_diffcont = self.gate_to_diffcont
+      ddover = (cdwmin - self.w) / 2.0
+    else:
+      gate_to_diffcont = self.gate_to_diffcont
+        
+
+    # Rule 2: Minimum poly width.  Poly contacts only move out
+    # if length &lt; contact poly width.  They move out enough
+    # that the diffusion-to-poly spacing is satisfied.
+    gporig = self.gate_to_polycont
+    cplmin = self.contact_size + (self.poly_surround*2)
+    cstem = self.gate_to_polycont - (cplmin / 2.0)
+    cgrow = self.diff_poly_space - cstem
+    if (self.ln + self.eps) &lt; cplmin:
+      if cgrow &gt; 0:
+        gate_to_polycont = self.gate_to_polycont + cgrow
+      else:
+        gate_to_polycont = self.gate_to_polycont
+    else:
+      gate_to_polycont = self.gate_to_polycont
+
+
+    # Rule 3: If both poly and diffusion are dogboned, then move
+    # poly out further to clear spacing to the diffusion contact
+    if (self.w + self.eps) &lt; cdwmin:
+      if (self.ln + self.eps) &lt; cplmin:
+        cgrow = (cplmin - self.w) / 2.0
+        gate_to_polycont = gate_to_polycont + cgrow
+
+
+    # Rule 4: If M &gt; 1 and poly contacts overlap, then increase the
+    # transistor-to-poly-contact distance by the amount of any
+    # diffusion dogbone overhang.
+    if self.poverlap == 1 and self.m &gt; 1:
+      if (gate_to_polycont - gporig) &lt; ddover:
+        gate_to_polycont = gporig + ddover
+
+
+    # Reduce contact sizes by poly or diffusion surround so that
+    # the contact area edges match the device diffusion or poly.
+    # (Minimum dimensions will be enforced by the contact drawing routine)
+    tsurround = self.diff_surround + self.selected_device["diff_overlap_cont"]
+    cdw = self.w - (tsurround*2)              # diff contact height
+    cpl = self.ln - (self.poly_surround*2)               # poly contact width
+
+    # Reduce by coverage percentage.  NOTE:  If overlapping multiple devices,
+    # keep maximum poly contact coverage.
+    cdw = cdw * self.diffcov / 100.0
+    if self.poverlap == 0 or self.m == 1:
+      cpl = cpl * self.polycov / 100.0
+
+
+    # Right diffusion contact
+    box_left = -(self.he + gate_to_diffcont)
+    box_bottom = 0
+    box_right = -(self.he + gate_to_diffcont)
+    box_top = 0
+    temp = self.draw_contact(0, cdw, self.diff_surround, self.metal_surround, self.contact_size, 
+                              self.selected_device["diff"], self.selected_device["diff_contact"], 
+                              self.layer_li, [box_left, box_bottom, box_right, box_top], "vert")
+    self.cext = self.unionbox(self.cext, temp)
+
+    # Left diffusion contact
+    box_left = (self.he + gate_to_diffcont)
+    box_bottom = 0
+    box_right = (self.he + gate_to_diffcont)
+    box_top = 0
+    temp = self.draw_contact(0, cdw, self.diff_surround, self.metal_surround, self.contact_size, 
+                              self.selected_device["diff"], self.selected_device["diff_contact"], 
+                              self.layer_li, [box_left, box_bottom, box_right, box_top], "vert")
+    self.cext = self.unionbox(self.cext, temp)
+    self.diffarea = self.cext
+
+    # Top poly contact
+    if self.topc:
+      box_left = 0
+      box_bottom = (self.hw + gate_to_polycont)
+      box_right = 0
+      box_top = (self.hw + gate_to_polycont)
+      temp = self.draw_contact(cpl, 0, self.poly_surround, self.metal_surround, self.contact_size, 
+                                self.selected_device["poly"], self.selected_device["poly_contact"], 
+                                self.selected_device["li"], [box_left, box_bottom, box_right, box_top], "horz")
+      self.cext = self.unionbox(self.cext, temp)
+
+    # Bottom poly contact
+    if self.botc:
+      box_left = 0
+      box_bottom = -(self.hw + gate_to_polycont)
+      box_right = 0
+      box_top = -(self.hw + gate_to_polycont)
+      temp = self.draw_contact(cpl, 0, self.poly_surround, self.metal_surround, self.contact_size, 
+                                self.selected_device["poly"], self.selected_device["poly_contact"], 
+                                self.selected_device["li"], [box_left, box_bottom, box_right, box_top], "horz")
+      self.cext = self.unionbox(self.cext, temp)
+
+
+
+  def draw_lvtn(self):
+
+    lvtn_box = pya.Box()
+    lvtn_box.bottom = -(self.w/2 + self.lvtn_gate_enc)/self.layout.dbu
+    lvtn_box.left = -(self.ln/2 + self.lvtn_gate_enc)/self.layout.dbu
+    lvtn_box.top = (self.w/2 + self.lvtn_gate_enc)/self.layout.dbu
+    lvtn_box.right = (self.ln/2 + self.lvtn_gate_enc)/self.layout.dbu
+    self.cell.shapes(self.selected_device["lvtn"]).insert(lvtn_box)
+
+
+  def draw_hvtp(self):
+
+    hvtp_box = pya.Box()
+    hvtp_box.left = -(self.w/2 + self.hvtp_gate_enc)/self.layout.dbu
+    hvtp_box.bottom = -(self.ln/2 + self.hvtp_gate_enc)/self.layout.dbu
+    hvtp_box.right = (self.w/2 + self.hvtp_gate_enc)/self.layout.dbu
+    hvtp_box.top = (self.ln/2 + self.hvtp_gate_enc)/self.layout.dbu
+    self.cell.shapes(self.selected_device["hvtp"]).insert(hvtp_box)
+
+
+
+
+  def produce_impl(self):
+
+    # self.epsilon for avoiding round-off errors
+    self.eps = 0.0005
+
+    # define layers
+    self.layer_diff = self.layout.layer(65, 20)
+    self.layer_poly = self.layout.layer(66, 20)
+    self.layer_licon = self.layout.layer(66, 44)
+    self.layer_pc = self.layout.layer(66, 44)
+    self.layer_li = self.layout.layer(67, 20)
+    self.layer_npc = self.layout.layer(95, 20)
+    self.layer_psdm = self.layout.layer(94, 20)
+    self.layer_nsdm = self.layout.layer(93, 44)
+    self.layer_hvi = self.layout.layer(75, 20)
+    self.layer_hvntm = self.layout.layer(125, 20)
+    self.layer_hvtp = self.layout.layer(78, 20)
+    self.layer_lvtn = self.layout.layer(125, 44)
+    self.layer_nwell = self.layout.layer(64, 20)
+
+
+    # for now hardcode to nshort - will select later
+    self.device = { "nshort" :  { "diff"                : self.layer_diff,
+                                  "poly"                : self.layer_poly,
+                                  "diff_contact"        : self.layer_licon,
+                                  "poly_contact"        : self.layer_licon,
+                                  "li"                  : self.layer_li,
+                                  "npc"                 : self.layer_npc,
+                                  "imp"                 : self.layer_nsdm,
+                                  "well"                : None, 
+                                  "gate_to_polycont"    : 0.275,
+                                  "min_effl"            : 0.185,
+                                  "min_allc"            : 0.26,
+                                  "diff_overlap_cont"   : 0.0,
+                                  "sub_surround_dev"    : 0.0,
+                                  "dev_sub_type"        : 0.0},
+                    "nlowvt" :  { "diff"                : self.layer_diff,
+                                  "poly"                : self.layer_poly,
+                                  "diff_contact"        : self.layer_licon,
+                                  "poly_contact"        : self.layer_licon,
+                                  "li"                  : self.layer_li,
+                                  "npc"                 : self.layer_npc,
+                                  "imp"                 : self.layer_nsdm,
+                                  "lvtn"                : self.layer_lvtn,
+                                  "well"                : None,
+                                  "gate_to_polycont"    : 0.275,
+                                  "min_effl"            : 0.185,
+                                  "min_allc"            : 0.26,
+                                  "diff_overlap_cont"   : 0.0,
+                                  "sub_surround_dev"    : 0.0,
+                                  "dev_sub_type"        : 0.0},
+                    "nhv" :     { "diff"                : self.layer_diff,
+                                  "poly"                : self.layer_poly,
+                                  "diff_contact"        : self.layer_licon,
+                                  "poly_contact"        : self.layer_licon,
+                                  "li"                  : self.layer_li,
+                                  "npc"                 : self.layer_npc,
+                                  "imp"                 : self.layer_nsdm,
+                                  "hvi"                 : self.layer_hvi,
+                                  "hvntm"               : self.layer_hvntm,
+                                  "well"                : None,
+                                  "gate_to_polycont"    : 0.275,
+                                  "min_effl"            : 0.185,
+                                  "min_allc"            : 0.26,
+                                  "diff_overlap_cont"   : 0.0,
+                                  "sub_surround_dev"    : 0.0,
+                                  "dev_sub_type"        : 0.0},
+                "nhvnative" : {   "diff"                : self.layer_diff,
+                                  "poly"                : self.layer_poly,
+                                  "diff_contact"        : self.layer_licon,
+                                  "poly_contact"        : self.layer_licon,
+                                  "li"                  : self.layer_li,
+                                  "npc"                 : self.layer_npc,
+                                  "imp"                 : self.layer_nsdm,
+                                  "hvi"                 : self.layer_hvi,
+                                  "hvntm"               : self.layer_hvntm,
+                                  "lvtn"                : self.layer_lvtn,
+                                  "well"                : None,
+                                  "gate_to_polycont"    : 0.275,
+                                  "min_effl"            : 0.185,
+                                  "min_allc"            : 0.26,
+                                  "diff_overlap_cont"   : 0.0,
+                                  "sub_surround_dev"    : 0.0,
+                                  "dev_sub_type"        : 0.0},
+                "pshort" :  {     "diff"                : self.layer_diff,
+                                  "poly"                : self.layer_poly,
+                                  "diff_contact"        : self.layer_licon,
+                                  "poly_contact"        : self.layer_licon,
+                                  "li"                  : self.layer_li,
+                                  "npc"                 : self.layer_npc,
+                                  "imp"                 : self.layer_psdm,
+                                  "well"                : self.layer_nwell,
+                                  "gate_to_polycont"    : 0.32,
+                                  "min_effl"            : 0.185,
+                                  "min_allc"            : 0.26,
+                                  "diff_overlap_cont"   : 0.0,
+                                  "sub_surround_dev"    : 0.0,
+                                  "dev_sub_type"        : 0.0},
+                "plowvt" :  {     "diff"                : self.layer_diff,
+                                  "poly"                : self.layer_poly,
+                                  "diff_contact"        : self.layer_licon,
+                                  "poly_contact"        : self.layer_licon,
+                                  "li"                  : self.layer_li,
+                                  "npc"                 : self.layer_npc,
+                                  "imp"                 : self.layer_psdm,
+                                  "lvtn"                : self.layer_lvtn,
+                                  "well"                : self.layer_nwell,
+                                  "gate_to_polycont"    : 0.32,
+                                  "min_effl"            : 0.185,
+                                  "min_allc"            : 0.26,
+                                  "diff_overlap_cont"   : 0.0,
+                                  "sub_surround_dev"    : 0.0,
+                                  "dev_sub_type"        : 0.0},
+                "phighvt" : {     "diff"                : self.layer_diff,
+                                  "poly"                : self.layer_poly,
+                                  "diff_contact"        : self.layer_licon,
+                                  "poly_contact"        : self.layer_licon,
+                                  "li"                  : self.layer_li,
+                                  "npc"                 : self.layer_npc,
+                                  "imp"                 : self.layer_psdm,
+                                  "hvtp"                : self.layer_hvtp,
+                                  "well"                : self.layer_nwell,
+                                  "gate_to_polycont"    : 0.32,
+                                  "min_effl"            : 0.185,
+                                  "min_allc"            : 0.26,
+                                  "diff_overlap_cont"   : 0.0,
+                                  "sub_surround_dev"    : 0.0,
+                                  "dev_sub_type"        : 0.0},
+                "phv" :    {      "diff"                : self.layer_diff,
+                                  "poly"                : self.layer_poly,
+                                  "diff_contact"        : self.layer_licon,
+                                  "poly_contact"        : self.layer_licon,
+                                  "li"                  : self.layer_li,
+                                  "npc"                 : self.layer_npc,
+                                  "imp"                 : self.layer_psdm,
+                                  "hvi"                 : self.layer_hvi,
+                                  "well"                : self.layer_nwell,
+                                  "gate_to_polycont"    : 0.32,
+                                  "min_effl"            : 0.185,
+                                  "min_allc"            : 0.26,
+                                  "diff_overlap_cont"   : 0.0,
+                                  "sub_surround_dev"    : 0.0,
+                                  "dev_sub_type"        : 0.0}}
+
+
+    # select the correct device parameters
+    self.selected_device = self.device[self.type_choices[self.type][0]]
+    self.gate_to_polycont = self.selected_device["gate_to_polycont"]   
+
+    # create a box that will be used for drawing
+    box = { "left"    : 0,
+            "bottom"  : 0,
+            "right"   : 0,
+            "top"     : 0}
+    box_null = box
+
+    
+    # draw the diffusion and ndsm
+    self.draw_diffusion()
+
+    # draw the poly
+    self.draw_poly()
+
+    # draw the contacts
+    self.draw_poly_diff_contacts()
+
+    # draw optional layers if they're required
+    if "lvtn" in self.selected_device.keys():
+      self.draw_lvtn()
+    if "hvtp" in self.selected_device.keys():
+      self.draw_hvtp()
+
+  
+    # sub_surround_dev, if defined, may create a larger area around the gate
+    # than sub_surround creates around the diffusion/poly area.
+    if self.selected_device["sub_surround_dev"]:
+      box_top += self.sub_surround_dev
+      box_bottom -= self.sub_surround_dev
+      box_right += self.sub_surround_dev
+      box_left -= self.sub_surround_dev
+      assert False, "Not implemented yet!"
+      #paint ${dev_sub_type}
+      #cext [sky130::unionbox $cext [sky130::getbox]]
+
+    if self.selected_device["dev_sub_type"]:
+      assert False, "Not implemented yet!"
+#   box values [lindex $diffarea 0]um [lindex $diffarea 1]um \
+#       [lindex $diffarea 2]um [lindex $diffarea 3]um
+#   box grow n ${sub_surround}um
+#   box grow s ${sub_surround}um
+#   box grow e ${sub_surround}um
+#   box grow w ${sub_surround}um
+#   paint ${dev_sub_type}
+#   set cext [sky130::unionbox $cext [sky130::getbox]]
+        # puts stdout "Diagnostic:  bounding box is $cext"
+#    }
+
+
+
+
+# Contact PCell decleration
+class Contact(pya.PCellDeclarationHelper):
+
+  def __init__(self):
+
+    # Important: initialize the super class
+    super(Contact, self).__init__()
+
+    # # declare the parameters
+    self.layer_choices = [("poly", 0), ("diff", 1), ("li", 2), ("met1", 3), ("met2", 4), ("met3", 5), ("met4", 6)]
+    self.param("bottom_layer", self.TypeInt, "Bottom Layer", choices=self.layer_choices)
+    self.param("nx", self.TypeInt, "Number Contacts (x)", default = 0)
+    self.param("ny", self.TypeInt, "Number Contacts (y)", default = 0)
+    self.param("dx", self.TypeInt, "Width (x)", default = 0)
+    self.param("dy", self.TypeInt, "Height (y)", default = 0)
+
+    # define the rules
+    self.diff_con_enc     = 0.06      # enclosure of contact by diff
+    self.npc_poly_con_enc = 0.10      # enclosure of poly contact by npc
+    self.poly_con_enc     = 0.05      # enclosure of poly contact by poly
+    self.licon_size       = 0.17      # poly/diff to licon contact size
+    self.licon_spacing    = 0.19      # poly/diff to licon contact to contact spacing
+    self.li_licon_enc     = 0.08      # enclosure of diffusion by doping
+    self.mcon_size        = 0.17      # li to met1 contact size
+    self.mcon_spacing     = 0.19      # li to met1 contact to contact spacing
+    self.mcon_met1_enc    = 0.06      # enclosure of contact  by met1
+    self.via1_size        = 0.15      # met1 to met2 via1 size
+    self.via1_spacing     = 0.17      # met1 to met2 via to via spacing
+    self.met1_via1_enc    = 0.085     # enclosure of via1 by met1
+    self.met2_via1_enc    = 0.085     # enclosure of via1 by met2
+    self.via2_size        = 0.20      # met2 to met3 via size
+    self.via2_spacing     = 0.20      # met2 to met3 via to via spacing
+    self.met2_via2_enc    = 0.085     # enclosure of via2 by met2
+    self.met3_via2_enc    = 0.085     # enclosure of via2 by met3
+    self.via3_size        = 0.20      # met3 to met4 via size
+    self.via3_spacing     = 0.35      # met3 to met4 via to via spacing
+    self.met3_via3_enc    = 0.090     # enclosure of via3 by met3
+    self.met4_via3_enc    = 0.090     # enclosure of via3 by met4
+    self.via4_size        = 0.80      # met4 to met5 via size
+    self.via4_spacing     = 0.80      # met4 to met5 via to via spacing
+    self.met4_via4_enc    = 0.19      # enclosure of via4 by met4
+    self.met5_via4_enc    = 0.31      # enclosure of via4 by met5
+  
+
+  def display_text_impl(self):
+    # Provide a descriptive text for the cell
+    return ("CONTACT = %s" % self.layer_choices[int(self.bottom_layer)][0].upper())
+
+
+
+  def produce_impl(self):
+
+    # define layers
+    self.layer_diff = self.layout.layer(65, 20)
+    self.layer_poly = self.layout.layer(66, 20)
+    self.layer_npc = self.layout.layer(95, 20)
+    self.layer_licon = self.layout.layer(66, 44)
+    self.layer_li = self.layout.layer(67, 20)
+    self.layer_mcon = self.layout.layer(67, 44)
+    self.layer_met1 = self.layout.layer(68, 20)
+    self.layer_via1 = self.layout.layer(68, 44)
+    self.layer_met2 = self.layout.layer(69, 20)
+    self.layer_via2 = self.layout.layer(69, 44)
+    self.layer_met3 = self.layout.layer(70, 20)
+    self.layer_via3 = self.layout.layer(70, 44)
+    self.layer_met4 = self.layout.layer(71, 20)
+    self.layer_via4 = self.layout.layer(71, 44)
+    self.layer_met5 = self.layout.layer(72, 20)
+
+    # select top, bottom and interconnect layers
+    self.selected_contact = self.layer_choices[int(self.bottom_layer)][0]
+    if self.selected_contact == "diff":
+      bottom_layer = self.layer_diff
+      bottom_enc = self.diff_con_enc
+      contact_layer = self.layer_licon
+      contact_size = self.licon_size
+      contact_spacing = self.licon_spacing
+      top_layer = self.layer_li
+      top_enc = self.li_licon_enc
+
+    elif self.selected_contact == "poly":
+      bottom_layer = self.layer_poly
+      bottom_enc = self.poly_con_enc
+      contact_layer = self.layer_licon
+      contact_size = self.licon_size
+      contact_spacing = self.licon_spacing
+      top_layer = self.layer_li
+      top_enc = self.li_licon_enc
+
+    elif self.selected_contact == "li":
+      bottom_layer = self.layer_li
+      bottom_enc = self.li_licon_enc
+      contact_layer = self.layer_mcon
+      contact_size = self.mcon_size
+      contact_spacing = self.mcon_spacing
+      top_layer = self.layer_met1
+      top_enc = self.mcon_met1_enc
+
+    elif self.selected_contact == "met1":
+      bottom_layer = self.layer_met1
+      bottom_enc = self.met1_via1_enc
+      contact_layer = self.layer_via1
+      contact_size = self.via1_size
+      contact_spacing = self.via1_spacing
+      top_layer = self.layer_met2
+      top_enc = self.met2_via1_enc
+
+    elif self.selected_contact == "met2":
+      bottom_layer = self.layer_met2
+      bottom_enc = self.met2_via2_enc
+      contact_layer = self.layer_via2
+      contact_size = self.via2_size
+      contact_spacing = self.via2_spacing
+      top_layer = self.layer_met3
+      top_enc = self.met3_via2_enc
+
+    elif self.selected_contact == "met3":
+      bottom_layer = self.layer_met3
+      bottom_enc = self.met3_via3_enc
+      contact_layer = self.layer_via3
+      contact_size = self.via3_size
+      contact_spacing = self.via3_spacing
+      top_layer = self.layer_met4
+      top_enc = self.met4_via3_enc
+
+    elif self.selected_contact == "met4":
+      bottom_layer = self.layer_met4
+      bottom_enc = self.met4_via4_enc
+      contact_layer = self.layer_via4
+      contact_size = self.via4_size
+      contact_spacing = self.via4_spacing
+      top_layer = self.layer_met5
+      top_enc = self.met5_via4_enc
+
+    elif self.selected_contact == "met5":
+      bottom_layer = self.layer_met5
+      bottom_enc = self.met5_via5_enc
+      contact_layer = self.layer_via5
+      contact_size = self.via5_size
+      contact_spacing = self.via5_spacing
+      top_layer = self.layer_met6
+      top_enc = self.met6_via5_enc
+
+
+    # determine if we're using number of contacts or area
+    if self.dx == 0 and self.dy == 0:
+      x_contacts = self.nx
+      y_contacts = self.ny
+
+      # calculate the area to be filled with metal
+      bottom_width = x_contacts*contact_size + (x_contacts-1)*contact_spacing + 2*bottom_enc
+      top_width = x_contacts*contact_size + (x_contacts-1)*contact_spacing + 2*top_enc
+      bottom_height = y_contacts*contact_size + (y_contacts-1)*contact_spacing + 2*bottom_enc
+      top_height = y_contacts*contact_size + (y_contacts-1)*contact_spacing + 2*top_enc
+    
+    else:
+
+      # calculate how many contacts can fit in the area
+      x_width = self.dx
+      y_height = self.dy
+
+      # take away the required space at the edges
+      bottom_x = x_width - 2*max(bottom_enc, top_enc)
+      bottom_y = y_height - 2*max(bottom_enc, top_enc)
+
+      # we can fit at least one contact
+      if bottom_x &gt; contact_size:
+
+        # can fit multiple contacts
+        if bottom_x &gt; 2*contact_size + contact_spacing:
+          x_contacts = int((bottom_x - contact_size) / (contact_size + contact_spacing))
+
+        # can only fit a single contact
+        else:
+          x_contacts = 1
+
+        # fill the whole area with metal
+        bottom_width = x_width
+        top_width = x_width
+
+      # can't put down any contact
+      else:
+        x_contacts = 0
+        assert x_contacts != 0, "Not enough horizontal space"
+
+      # we can fit at least one contact
+      if bottom_y &gt; contact_size:
+
+        # can fit multiple contacts
+        if bottom_y &gt; 2*contact_size + contact_spacing:
+          y_contacts = int((bottom_y - contact_size) / (contact_size + contact_spacing))
+
+        # can only fit a single contact
+        else:
+          y_contacts = 1
+
+        # fill the whole area with metal
+        bottom_height = y_height
+        top_height = y_height
+
+      # can't put down any contact
+      else:
+        y_contacts = 0
+        assert y_contacts != 0, "Not enough vertical space"
+
+    # paint the bottom area
+    bottom_box = pya.Box()
+    bottom_box.left = -(bottom_width/2)/self.layout.dbu
+    bottom_box.bottom = -(bottom_height/2)/self.layout.dbu
+    bottom_box.right = (bottom_width/2)/self.layout.dbu
+    bottom_box.top = (bottom_height/2)/self.layout.dbu
+    self.cell.shapes(bottom_layer).insert(bottom_box)
+
+    # paint the top area
+    top_box = pya.Box()
+    top_box.left = -(top_width/2)/self.layout.dbu
+    top_box.bottom = -(top_height/2)/self.layout.dbu
+    top_box.right = (top_width/2)/self.layout.dbu
+    top_box.top = (top_height/2)/self.layout.dbu
+    self.cell.shapes(top_layer).insert(top_box)
+
+    # we want to know the extents of the drawn contacts
+    cont_extent_left = 100000000.0
+    cont_extent_bottom = 100000000.0
+    cont_extent_right = -100000000.0
+    cont_extent_top = -100000000.0
+
+    # loop through drawing each of the contacts
+    contact_box = pya.Box()
+    for nx in range(int(x_contacts)):
+      for ny in range(int(y_contacts)):
+
+        # determine the location of the contacts
+        contact_box_left = -(x_contacts*contact_size + (x_contacts-1)*contact_spacing)/2 + nx*(contact_size + contact_spacing)
+        contact_box_bottom = -(y_contacts*contact_size + (y_contacts-1)*contact_spacing)/2 + ny*(contact_size + contact_spacing)
+        contact_box_right = contact_box_left + contact_size
+        contact_box_top = contact_box_bottom + contact_size
+
+        # draw the contact shape
+        contact_box.left = contact_box_left/self.layout.dbu
+        contact_box.right = contact_box_right/self.layout.dbu
+        contact_box.bottom = contact_box_bottom/self.layout.dbu
+        contact_box.top = contact_box_top/self.layout.dbu
+        self.cell.shapes(contact_layer).insert(contact_box)
+        
+        # update the known extents of the contacts
+        cont_extent_left = min(cont_extent_left, contact_box_left)
+        cont_extent_bottom = min(cont_extent_bottom, contact_box_bottom)
+        cont_extent_right = max(cont_extent_right, cont_extent_right, contact_box_right)
+        cont_extent_top = max(cont_extent_top, contact_box_top)
+
+    # if poly we require additional npc
+    if self.selected_contact == "poly":
+      npc_box = pya.Box()
+      npc_box.left = (cont_extent_left - self.npc_poly_con_enc)/self.layout.dbu
+      npc_box.bottom = (cont_extent_bottom - self.npc_poly_con_enc)/self.layout.dbu
+      npc_box.right = (cont_extent_right + self.npc_poly_con_enc)/self.layout.dbu
+      npc_box.top = (cont_extent_top + self.npc_poly_con_enc)/self.layout.dbu
+      self.cell.shapes(self.layer_npc).insert(npc_box)
+
+
+
+
+# The PCell library declaration
+# A PCell library must be declared by deriving a custom class from RBA::Library.
+# The main purpose of this class is to provide the PCell declarations and to register itself
+# with a proper name.
+class PCellSky130(pya.Library):
+
+  def __init__(self):
+  
+    # TODO: change the description
+    self.description = "Skywater 130nm PCELL Set"
+    
+    # register the PCell declarations
+    self.layout().register_pcell("mos", MOS())
+    self.layout().register_pcell("contact", Contact())
+    
+    # register our library with the name "PCellLib"
+    self.register("sky130")
+    
+# instantiate and register the library
+PCellSky130()
+
+</text>
+</klayout-macro>
